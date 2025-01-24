@@ -1,0 +1,2 @@
+# panmapper
+Metagenomic pangenome mapper
