@@ -1,0 +1,3 @@
+genome_dir: "resources/genomes" # Directory containing genome files
+reads_dir: "resources/reads" # Directory containing read FASTQ files
+output_dir: "results" # Directory to store output files

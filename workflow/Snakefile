@@ -1,0 +1,157 @@
+import os
+import pandas as pd
+from glob import glob
+
+# Configurations
+configfile: "config/config.yaml"
+
+# Input and output directories
+GENOME_DIR = config["genome_dir"]
+READS_DIR = config["reads_dir"]
+OUTPUT_DIR = config["output_dir"]
+
+# Directories
+DREP_DIR = f"{OUTPUT_DIR}/drep"
+PRODIGAL_DIR = f"{OUTPUT_DIR}/prodigal"
+CLUSTER_DIR = f"{OUTPUT_DIR}/clusters"
+MMSEQS_DIR = f"{OUTPUT_DIR}/mmseqs"
+CHECKM2_DIR = f"{OUTPUT_DIR}/checkm2"
+GTDBTK_DIR = f"{OUTPUT_DIR}/gtdbtk"
+KOFAMS_DIR = f"{OUTPUT_DIR}/kofams"
+BOWTIE_DIR = f"{OUTPUT_DIR}/bowtie"
+COVERM_DIR = f"{OUTPUT_DIR}/coverm"
+
+# Infer genomes and samples
+genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
+samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
+
+#Read the primary_cluster column from the Cdb.csv file produced by drep and return unique clusters
+def get_unique_clusters(cdb_file):
+    if not os.path.exists(cdb_file):
+        return []  # Return an empty list if the file doesn't exist yet
+    df = pd.read_csv(cdb_file)
+    return df["primary_cluster"].unique().tolist()
+
+# Rules
+rule all:
+    input:
+        expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
+        f"{DREP_DIR}",
+        f"{CLUSTER_DIR}/all_clusters.fna",
+        expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
+        expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples)
+
+rule run_drep:
+    input:
+        genomes=expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
+    output:
+        directory(f"{DREP_DIR}")
+    conda:
+        "../environments/clustering.yml"
+    shell:
+        """
+        dRep compare {output} -g {input}
+        """
+
+rule run_prodigal:
+    input:
+        f"{GENOME_DIR}/{{genome}}.fna"
+    output:
+        f"{PRODIGAL_DIR}/{{genome}}.fna"
+    conda:
+        "../environments/clustering.yml"
+    shell:
+        """
+        prodigal -i {input} -a {output}
+        """
+
+# Precompute unique_clusters based on the Cdb.csv file
+if os.path.exists(f"{DREP_DIR}/data_tables/Cdb.csv"):
+    cdb_df = pd.read_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    unique_clusters = cdb_df["primary_cluster"].unique()
+else:
+    unique_clusters = []
+
+rule cluster_genomes:
+    input:
+        csv=f"{DREP_DIR}/data_tables/Cdb.csv",
+        prodigal_files=expand("genes/{genome}.fna", genome=genomes)
+    output:
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+    run:
+        # Read clustering information from the CSV
+        df = pd.read_csv(input.csv)
+        cluster_dict = df.groupby("primary_cluster")["genome"].apply(list).to_dict()
+
+        os.makedirs(CLUSTER_DIR, exist_ok=True)
+
+        # Create cluster files by concatenating genomes
+        for cluster_id, genome_list in cluster_dict.items():
+            cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.fna"
+            with open(cluster_file, "w") as out_file:
+                for genome in genome_list:
+                    prodigal_file = f"genes/{genome}"
+                    if prodigal_file in input.prodigal_files:
+                        with open(prodigal_file, "r") as f:
+                            out_file.write(f.read())
+
+rule run_mmseqs:
+    input:
+        cluster_genes=f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna"
+    output:
+        rep_fna=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.fna",
+        rep_tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.tsv"
+    params:
+        tmp=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_tmp"
+    conda:
+        "../environments/clustering.yml"
+    shell:
+        """
+        mmseqs easy-linclust {input.cluster_genes} {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output {params.tmp} --min-seq-id 0.8 --cov-mode 1 -c 0.8
+        rm {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_all_seqs.fasta
+        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_rep_seq.fasta {output.rep_fna}
+        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_cluster.tsv {output.rep_tsv}
+        rm -rf {params.tmp}
+        """
+
+#rule run_checkm2:
+#rule run_gtdbtk:
+#rule run_kofams:
+
+rule concatenate_clusters:
+    input:
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+    output:
+        f"{CLUSTER_DIR}/all_clusters.fna"
+    run:
+        with open(output[0], "w") as out_file:
+            for cluster_file in input:
+                with open(cluster_file, "r") as in_file:
+                    out_file.write(in_file.read())
+
+rule build_bowtie_index:
+    input:
+        f"{CLUSTER_DIR}/all_clusters.fna"
+    output:
+        expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"])
+    conda:
+        "../environments/quantification.yml"
+    shell:
+        """
+        mkdir -p {BOWTIE_DIR}
+        bowtie2-build {input} {BOWTIE_DIR}/all_clusters
+        """
+
+rule map_reads:
+    input:
+        index=expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
+        r1=f"{READS_DIR}/{{sample}}_1.fq.gz",
+        r2=f"{READS_DIR}/{{sample}}_2.fq.gz"
+    output:
+        f"{BOWTIE_DIR}/{{sample}}.bam"
+    conda:
+        "../environments/quantification.yml"
+    shell:
+        """
+        bowtie2 -x {BOWTIE_DIR}/all_clusters -1 {input.r1} -2 {input.r2} | samtools view -bS - > {output}
+        """

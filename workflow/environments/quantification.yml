@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bowtie2=2.5.4
+  - samtools=1.21
+  - diamond=2.0.4
+  - checkm2=1.0.2
+  - coverm=0.7.0
