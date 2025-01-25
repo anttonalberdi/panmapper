@@ -5,3 +5,4 @@ temp_dir: "tmp" # Directory to store output files
 
 checkm2_database: "/maps/datasets/globe_databases/checkm2/20210323/uniref100.KO.1.dmnd"
 gtdb_database: "/maps/datasets/globe_databases/gtdbtk_db/20241001"
+kofams_database: "/maps/datasets/globe_databases/dram/20240606/kofam_profiles.hmm"

@@ -15,6 +15,8 @@ set-threads:
     run_mmseqs: 1
     run_checkm2: 1
     run_gtdbtk: 1
+    run_kofams: 1
+    merge_kofams: 1
     concatenate_clusters: 1
     build_bowtie_index: 1
     map_reads: 1
@@ -39,6 +41,12 @@ set-resources:
     run_gtdbtk:
         mem_mb: 8 * 1024
         runtime: 30 * 2 ** (attempt - 1)
+    run_kofams:
+        mem_mb: 8 * 1024
+        runtime: 30 * 2 ** (attempt - 1)
+    merge_kofams:
+        mem_mb: 8 * 1024
+        runtime: 5 * 2 ** (attempt - 1)
     concatenate_clusters:
         mem_mb: 8 * 1024
         runtime: 5 * 2 ** (attempt - 1)

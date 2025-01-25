@@ -8,6 +8,7 @@ configfile: "config/config.yaml"
 # Database directories
 CHECKM2_DATABASE = config["checkm2_database"]
 GTDB_DATABASE = config["gtdb_database"]
+KOFAMS_DATABASE = config["kofams_database"]
 
 # Input and output directories
 GENOME_DIR = config["genome_dir"]
@@ -25,6 +26,7 @@ GTDBTK_DIR = f"{OUTPUT_DIR}/gtdbtk"
 KOFAMS_DIR = f"{OUTPUT_DIR}/kofams"
 BOWTIE_DIR = f"{OUTPUT_DIR}/bowtie"
 COVERM_DIR = f"{OUTPUT_DIR}/coverm"
+FINAL_DIR = f"{OUTPUT_DIR}/final"
 
 # Infer genomes and samples
 genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
@@ -43,11 +45,15 @@ rule all:
         expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
         f"{DREP_DIR}",
         f"{BOWTIE_DIR}/all_clusters.fna",
-        f"{CHECKM2_DIR}",
-        f"{GTDBTK_DIR}",
+        #f"{CHECKM2_DIR}",
+        #f"{GTDBTK_DIR}",
         expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
         expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
-        f"{COVERM_DIR}/all_clusters.tsv"
+        f"{COVERM_DIR}/all_clusters.tsv",
+        f"{KOFAMS_DIR}/all_clusters.tsv",
+        f"{FINAL_DIR}/cluster_info.csv",
+        f"{FINAL_DIR}/counts.csv",
+        f"{FINAL_DIR}/coverage.csv"
 
 rule run_drep:
     input:
@@ -66,12 +72,13 @@ rule run_prodigal:
     input:
         f"{GENOME_DIR}/{{genome}}.fna"
     output:
-        f"{PRODIGAL_DIR}/{{genome}}.fna"
+        nt=f"{PRODIGAL_DIR}/{{genome}}.fna",
+        aa=f"{PRODIGAL_DIR}/{{genome}}.faa"
     conda:
         "environments/clustering.yml"
     shell:
         """
-        prodigal -i {input} -d {output}
+        prodigal -i {input} -d {output.nt} -a {output.aa}
         """
 
 # Precompute unique_clusters based on the Cdb.csv file
@@ -84,9 +91,11 @@ else:
 rule cluster_genomes:
     input:
         csv=f"{DREP_DIR}/data_tables/Cdb.csv",
-        prodigal_files=expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes)
+        nt=expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes),
+        aa=expand(f"{PRODIGAL_DIR}/{{genome}}.faa", genome=genomes)
     output:
         expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters),
         touch(f"{CLUSTER_DIR}/done.txt")
     run:
         # Read clustering information from the CSV
@@ -97,14 +106,23 @@ rule cluster_genomes:
 
         # Create cluster files by concatenating genomes
         for cluster_id, genome_list in cluster_dict.items():
+            #Generate nucleotide sequences
             cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.fna"
             with open(cluster_file, "w") as out_file:
                 for genome_id in genome_list:
                     prodigal_file = f"{PRODIGAL_DIR}/{genome_id}"
-                    if prodigal_file in input.prodigal_files:
+                    if prodigal_file in input.nt:
                         with open(prodigal_file, "r") as f:
                             out_file.write(f.read())
-
+            #Generate amino acid sequences
+            cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.faa"
+            with open(cluster_file, "w") as out_file:
+                for genome_id in genome_list:
+                    genome_id2 = genome_id.replace(".fna", ".faa")
+                    prodigal_file2 = f"{PRODIGAL_DIR}/{genome_id2}"
+                    if prodigal_file2 in input.aa:
+                        with open(prodigal_file2, "r") as f:
+                            out_file.write(f.read())
 rule run_mmseqs:
     input:
         cluster_genes=f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna"
@@ -164,9 +182,7 @@ rule run_gtdbtk:
             --skip_ani_screen
         """
 
-#rule run_kofams:
-
-rule concatenate_clusters:
+rule concatenate_clusters_nt:
     input:
         clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
         placeholder=f"{CLUSTER_DIR}/done.txt"
@@ -178,17 +194,62 @@ rule concatenate_clusters:
                 with open(cluster_file, "r") as in_file:
                     out_file.write(in_file.read())
 
+rule concatenate_clusters_aa:
+    input:
+        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters),
+        placeholder=f"{CLUSTER_DIR}/done.txt"
+    output:
+        f"{KOFAMS_DIR}/all_clusters.faa"
+    run:
+        with open(output[0], "w") as out_file:
+            for cluster_file in input.clusters:
+                with open(cluster_file, "r") as in_file:
+                    out_file.write(in_file.read())
+
+rule run_kofams:
+    input:
+        f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa"
+    output:
+        txt=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.txt",
+        tsv=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv"
+    params:
+        database=f"{KOFAMS_DATABASE}"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        hmmscan -o {output.txt} --tblout {output.tsv} --noali {params.database} {input}
+        """
+
+rule merge_kofams:
+    input:
+        expand(f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=unique_clusters)
+    output:
+        tsv=f"{KOFAMS_DIR}/all_clusters.tsv",
+        csv=f"{KOFAMS_DIR}/all_clusters.csv"
+    params:
+        database=f"{KOFAMS_DATABASE}"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        cat {input} > {output.tsv}
+        python worflow/scripts/select_ko.py {output.tsv} {output.csv}
+        """
+
 rule build_bowtie_index:
     input:
         f"{BOWTIE_DIR}/all_clusters.fna"
     output:
-        expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"])
+        index=expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
+        lengths=f"{FINAL_DIR}/contig_lengths.tsv"
     conda:
         "environments/quantification.yml"
     shell:
         """
         mkdir -p {BOWTIE_DIR}
         bowtie2-build {input} {BOWTIE_DIR}/all_clusters
+        python worflow/scripts/calculate_contig_lengths.py {input} {output.lengths}
         """
 
 rule map_reads:
@@ -215,4 +276,22 @@ rule quantify_reads:
     shell:
         """
         coverm contig -m count covered_bases -b {input} -t {threads} -o {output}
+        """
+
+rule final_files:
+    input:
+        lengths=f"{FINAL_DIR}/contig_lengths.tsv",
+        coverm=f"{COVERM_DIR}/all_clusters.tsv",
+        clusters=f"{DREP_DIR}/data_tables/Cdb.csv",
+        kofams=f"{KOFAMS_DIR}/all_clusters.csv"
+    output:
+        info=f"{FINAL_DIR}/cluster_info.csv",
+        counts=f"{FINAL_DIR}/counts.csv",
+        coverage=f"{FINAL_DIR}/coverage.csv"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        python worflow/scripts/separate_coverm.py {input.coverm} {output.counts} {output.bases}
+        python worflow/scripts/pangenome_info.py {input.clusters} {input.lengths} {input.kofams} {output.info}
         """
