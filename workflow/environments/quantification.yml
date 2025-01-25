@@ -10,3 +10,4 @@ dependencies:
   - coverm=0.7.0
   - gtdbtk=2.4.0
   - hmmer=3.4
+  - biopython=1.83

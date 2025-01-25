@@ -8,7 +8,7 @@ def main():
 
     contig_lengths = []
     for record in SeqIO.parse(fna_file, "fasta"):
-        contig_lengths.append({"Contig": record.id, "Length": len(record.seq)})
+        contig_lengths.append({"contig": record.id, "length": len(record.seq)})
 
     pd.DataFrame(contig_lengths).to_csv(output_file, index=False)
 

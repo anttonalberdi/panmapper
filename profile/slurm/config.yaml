@@ -28,7 +28,7 @@ set-threads:
 set-resources:
     run_drep:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
-        runtime: 10 * 2 ** (attempt - 1)
+        runtime: 30 * 2 ** (attempt - 1)
     run_prodigal:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 12 * 2 ** (attempt - 1)
@@ -46,7 +46,7 @@ set-resources:
         runtime: 60 * 2 ** (attempt - 1)
     run_kofams:
         mem_mb: 16 * 1024 * 2 ** (attempt - 1)
-        runtime: 60 * 2 ** (attempt - 1)
+        runtime: 120 * 2 ** (attempt - 1)
     merge_kofams:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
         runtime: 5 * 2 ** (attempt - 1)
@@ -55,7 +55,7 @@ set-resources:
         runtime: 5 * 2 ** (attempt - 1)
     build_bowtie_index:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 5 * 2 ** (attempt - 1)
+        runtime: 15 * 2 ** (attempt - 1)
     map_reads:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)

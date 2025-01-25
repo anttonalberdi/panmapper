@@ -32,28 +32,37 @@ FINAL_DIR = f"{OUTPUT_DIR}/final"
 genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
 samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
 
-#Read the primary_cluster column from the Cdb.csv file produced by drep and return unique clusters
+#Read the secondary_cluster column from the Cdb.csv file produced by drep and return unique clusters
 def get_unique_clusters(cdb_file):
     if not os.path.exists(cdb_file):
         return []  # Return an empty list if the file doesn't exist yet
     df = pd.read_csv(cdb_file)
-    return df["primary_cluster"].unique().tolist()
+    return df["secondary_cluster"].unique().tolist()
 
 # Rules
 rule all:
     input:
         expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
+        f"{FINAL_DIR}/genome_contig.csv",
         f"{DREP_DIR}",
         f"{BOWTIE_DIR}/all_clusters.fna",
         #f"{CHECKM2_DIR}",
         #f"{GTDBTK_DIR}",
-        expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
-        expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
-        f"{COVERM_DIR}/all_clusters.tsv",
-        f"{KOFAMS_DIR}/all_clusters.tsv",
+        #expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
+        #expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
         f"{FINAL_DIR}/cluster_info.csv",
         f"{FINAL_DIR}/counts.csv",
         f"{FINAL_DIR}/coverage.csv"
+
+rule create_genome_contig_table:
+    input:
+        expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
+    output:
+        f"{FINAL_DIR}/genome_contig.csv"
+    shell:
+        """
+        python workflow/scripts/genome_contig_table.py {input} {output}
+        """
 
 rule run_drep:
     input:
@@ -84,7 +93,7 @@ rule run_prodigal:
 # Precompute unique_clusters based on the Cdb.csv file
 if os.path.exists(f"{DREP_DIR}/data_tables/Cdb.csv"):
     cdb_df = pd.read_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    unique_clusters = cdb_df["primary_cluster"].unique()
+    unique_clusters = cdb_df["secondary_cluster"].unique()
 else:
     unique_clusters = []
 
@@ -100,7 +109,7 @@ rule cluster_genomes:
     run:
         # Read clustering information from the CSV
         df = pd.read_csv(input.csv)
-        cluster_dict = df.groupby("primary_cluster")["genome"].apply(list).to_dict()
+        cluster_dict = df.groupby("secondary_cluster")["genome"].apply(list).to_dict()
 
         os.makedirs(CLUSTER_DIR, exist_ok=True)
 
@@ -125,10 +134,12 @@ rule cluster_genomes:
                             out_file.write(f.read())
 rule run_mmseqs:
     input:
-        cluster_genes=f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna"
+        cluster_genes=f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna",
+        placeholder=f"{CLUSTER_DIR}/done.txt"
     output:
-        rep_fna=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.fna",
-        rep_tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.tsv"
+        fna=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna",
+        tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv",
+        faa=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
     params:
         tmp=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_tmp"
     conda:
@@ -137,15 +148,15 @@ rule run_mmseqs:
         """
         mmseqs easy-linclust {input.cluster_genes} {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output {params.tmp} --min-seq-id 0.8 --cov-mode 1 -c 0.8
         rm {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_all_seqs.fasta
-        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_rep_seq.fasta {output.rep_fna}
-        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_cluster.tsv {output.rep_tsv}
+        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_rep_seq.fasta {output.fna}
+        mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_cluster.tsv {output.tsv}
+        transeq -sequence {output.fna} -outseq {output.faa} -frame 1 -clean
         rm -rf {params.tmp}
         """
 
 rule run_checkm2:
     input:
-        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
-        placeholder=f"{CLUSTER_DIR}/done.txt"
+        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
     output:
         directory(f"{CHECKM2_DIR}")
     params:
@@ -159,8 +170,7 @@ rule run_checkm2:
 
 rule run_gtdbtk:
     input:
-        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
-        placeholder=f"{CLUSTER_DIR}/done.txt"
+        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
     output:
         directory(f"{GTDBTK_DIR}")
     params:
@@ -184,8 +194,7 @@ rule run_gtdbtk:
 
 rule concatenate_clusters_nt:
     input:
-        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
-        placeholder=f"{CLUSTER_DIR}/done.txt"
+        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
     output:
         f"{BOWTIE_DIR}/all_clusters.fna"
     run:
@@ -196,8 +205,7 @@ rule concatenate_clusters_nt:
 
 rule concatenate_clusters_aa:
     input:
-        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters),
-        placeholder=f"{CLUSTER_DIR}/done.txt"
+        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters)
     output:
         f"{KOFAMS_DIR}/all_clusters.faa"
     run:
@@ -208,7 +216,7 @@ rule concatenate_clusters_aa:
 
 rule run_kofams:
     input:
-        f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa"
+        aa=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
     output:
         txt=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.txt",
         tsv=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv"
@@ -218,7 +226,7 @@ rule run_kofams:
         "environments/quantification.yml"
     shell:
         """
-        hmmscan -o {output.txt} --tblout {output.tsv} --noali {params.database} {input}
+        hmmscan -o {output.txt} --tblout {output.tsv} -E 1e-5 --noali {params.database} {input.aa}
         """
 
 rule merge_kofams:
@@ -234,7 +242,7 @@ rule merge_kofams:
     shell:
         """
         cat {input} > {output.tsv}
-        python worflow/scripts/select_ko.py {output.tsv} {output.csv}
+        python workflow/scripts/select_ko.py {output.tsv} {output.csv}
         """
 
 rule build_bowtie_index:
@@ -242,14 +250,14 @@ rule build_bowtie_index:
         f"{BOWTIE_DIR}/all_clusters.fna"
     output:
         index=expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
-        lengths=f"{FINAL_DIR}/contig_lengths.tsv"
+        lengths=f"{FINAL_DIR}/contig_lengths.csv"
     conda:
         "environments/quantification.yml"
     shell:
         """
         mkdir -p {BOWTIE_DIR}
         bowtie2-build {input} {BOWTIE_DIR}/all_clusters
-        python worflow/scripts/calculate_contig_lengths.py {input} {output.lengths}
+        python workflow/scripts/calculate_contig_lengths.py {input} {output.lengths}
         """
 
 rule map_reads:
@@ -280,7 +288,8 @@ rule quantify_reads:
 
 rule final_files:
     input:
-        lengths=f"{FINAL_DIR}/contig_lengths.tsv",
+        genomes=f"{FINAL_DIR}/genome_contig.csv",
+        lengths=f"{FINAL_DIR}/contig_lengths.csv",
         coverm=f"{COVERM_DIR}/all_clusters.tsv",
         clusters=f"{DREP_DIR}/data_tables/Cdb.csv",
         kofams=f"{KOFAMS_DIR}/all_clusters.csv"
@@ -292,6 +301,6 @@ rule final_files:
         "environments/quantification.yml"
     shell:
         """
-        python worflow/scripts/separate_coverm.py {input.coverm} {output.counts} {output.bases}
-        python worflow/scripts/pangenome_info.py {input.clusters} {input.lengths} {input.kofams} {output.info}
+        python workflow/scripts/separate_coverm.py {input.coverm} {output.counts} {output.coverage}
+        python workflow/scripts/pangenome_info.py {input.clusters} {input.genomes} {input.lengths} {input.kofams} {output.info}
         """
