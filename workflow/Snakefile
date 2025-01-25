@@ -30,7 +30,6 @@ COVERM_DIR = f"{OUTPUT_DIR}/coverm"
 genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
 samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
 
-
 #Read the primary_cluster column from the Cdb.csv file produced by drep and return unique clusters
 def get_unique_clusters(cdb_file):
     if not os.path.exists(cdb_file):
