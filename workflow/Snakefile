@@ -48,21 +48,12 @@ rule all:
         f"{BOWTIE_DIR}/all_clusters.fna",
         #f"{CHECKM2_DIR}",
         #f"{GTDBTK_DIR}",
+        f"{KOFAMS_DIR}/all_clusters.faa",
         #expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
         #expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
         f"{FINAL_DIR}/cluster_info.csv",
         f"{FINAL_DIR}/counts.csv",
         f"{FINAL_DIR}/coverage.csv"
-
-rule create_genome_contig_table:
-    input:
-        expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
-    output:
-        f"{FINAL_DIR}/genome_contig.csv"
-    shell:
-        """
-        python workflow/scripts/genome_contig_table.py {input} {output}
-        """
 
 rule run_drep:
     input:
@@ -88,6 +79,16 @@ rule run_prodigal:
     shell:
         """
         prodigal -i {input} -d {output.nt} -a {output.aa}
+        """
+
+rule create_genome_gene_table:
+    input:
+        expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes)
+    output:
+        f"{FINAL_DIR}/genome_gene.csv"
+    shell:
+        """
+        python workflow/scripts/genome_gene_table.py {input} {output}
         """
 
 # Precompute unique_clusters based on the Cdb.csv file
@@ -138,8 +139,7 @@ rule run_mmseqs:
         placeholder=f"{CLUSTER_DIR}/done.txt"
     output:
         fna=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna",
-        tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv",
-        faa=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
+        tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv"
     params:
         tmp=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_tmp"
     conda:
@@ -150,8 +150,18 @@ rule run_mmseqs:
         rm {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_all_seqs.fasta
         mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_rep_seq.fasta {output.fna}
         mv {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output_cluster.tsv {output.tsv}
-        transeq -sequence {output.fna} -outseq {output.faa} -frame 1 -clean
         rm -rf {params.tmp}
+        """
+
+
+rule translate_genes:
+    input:
+        f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna"
+    output:
+        f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
+    shell:
+        """
+        python workflow/scripts/translate_genes.py {input} {output}
         """
 
 rule run_checkm2:
@@ -250,14 +260,14 @@ rule build_bowtie_index:
         f"{BOWTIE_DIR}/all_clusters.fna"
     output:
         index=expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
-        lengths=f"{FINAL_DIR}/contig_lengths.csv"
+        lengths=f"{FINAL_DIR}/gene_lengths.csv"
     conda:
         "environments/quantification.yml"
     shell:
         """
         mkdir -p {BOWTIE_DIR}
         bowtie2-build {input} {BOWTIE_DIR}/all_clusters
-        python workflow/scripts/calculate_contig_lengths.py {input} {output.lengths}
+        python workflow/scripts/calculate_gene_lengths.py {input} {output.lengths}
         """
 
 rule map_reads:
@@ -288,7 +298,7 @@ rule quantify_reads:
 
 rule final_files:
     input:
-        genomes=f"{FINAL_DIR}/genome_contig.csv",
+        genomes=f"{FINAL_DIR}/genome_gene.csv",
         lengths=f"{FINAL_DIR}/contig_lengths.csv",
         coverm=f"{COVERM_DIR}/all_clusters.tsv",
         clusters=f"{DREP_DIR}/data_tables/Cdb.csv",

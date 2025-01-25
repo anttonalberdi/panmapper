@@ -30,7 +30,7 @@ def main():
     final_df = df_lowest_evalue[["gene", "ko_id", "ko_e"]]
 
     # Save the result to the output file
-    final_df.to_csv(output_file, sep="\t", index=False)
+    final_df.to_csv(output_file, index=False)
 
 if __name__ == "__main__":
     main()

@@ -35,11 +35,15 @@ def main():
         how="left"
     )
 
-    merged_df2 = merged_df2.rename(columns={"secondary_cluster": "cluster", "contig": "gene"})
+    merged_df2 = merged_df2.rename(columns={"secondary_cluster": "cluster"})
+
+    print(merged_df2)
+
+    print(kofams_df)
 
     merged_df3 = pd.merge(
         merged_df2,
-        kofams,
+        kofams_df,
         left_on="gene",
         right_on="gene",
         how="left"

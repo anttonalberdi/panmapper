@@ -13,8 +13,8 @@ def main(input_files, output_file):
         # Parse the FASTA file to extract contig names
         with open(file_path, "r") as fasta_file:
             for record in SeqIO.parse(fasta_file, "fasta"):
-                contig_name = record.id  # Extract the header ID
-                rows.append({"genome": genome_name, "contig": contig_name})
+                contig_name = record.id.split(" ")[0]
+                rows.append({"genome": genome_name, "gene": contig_name})
 
     # Create a DataFrame and save to CSV
     df = pd.DataFrame(rows)
