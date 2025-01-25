@@ -1,0 +1,56 @@
+executor: slurm
+jobs: 20
+latency-wait: 60
+use-conda: true
+rerun-incomplete: true
+keep-going: false
+attempt: 3
+
+default-resources:
+    mem_mb: 8 * 1024
+    runtime: 10 * 2 ** (attempt - 1)
+max-threads: 8
+
+set-threads:
+    run_drep: 1
+    run_prodigal: 1
+    cluster_genomes: 1
+    run_mmseqs: 1
+    run_checkm2: 1
+    run_gtdbtk: 1
+    concatenate_clusters: 1
+    build_bowtie_index: 1
+    map_reads: 1
+    quantify_reads: 1
+
+set-resources:
+    run_drep:
+        mem_mb: 8 * 1024
+        runtime: 10 * 2 ** (attempt - 1)
+    run_prodigal:
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
+        runtime: 12 * 2 ** (attempt - 1)
+    cluster_genomes:
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
+        runtime: 5 * 2 ** (attempt - 1)
+    run_mmseqs:
+        mem_mb: 32 * 1024
+        runtime: 10 * 2 ** (attempt - 1)
+    run_checkm2:
+        mem_mb: 32 * 1024
+        runtime: 10 * 2 ** (attempt - 1)
+    run_gtdbtk:
+        mem_mb: 8 * 1024
+        runtime: 10 * 2 ** (attempt - 1)
+    concatenate_clusters:
+        mem_mb: 8 * 1024 * 2 ** (attempt - 1)
+        runtime: 5 * 2 ** (attempt - 1)
+    build_bowtie_index:
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
+        runtime: 5 * 2 ** (attempt - 1)
+    map_reads:
+        mem_mb: 32 * 1024
+        runtime: 10 * 2 ** (attempt - 1)
+    quantify_reads:
+        mem_mb: 32 * 1024
+        runtime: 10 * 2 ** (attempt - 1)

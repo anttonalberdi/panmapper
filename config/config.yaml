@@ -1,3 +1,7 @@
 genome_dir: "resources/genomes" # Directory containing genome files
 reads_dir: "resources/reads" # Directory containing read FASTQ files
 output_dir: "results" # Directory to store output files
+temp_dir: "tmp" # Directory to store output files
+
+checkm2_database: "/maps/datasets/globe_databases/checkm2/20210323/uniref100.KO.1.dmnd"
+gtdb_database: "/maps/datasets/globe_databases/gtdbtk_db/20241001"

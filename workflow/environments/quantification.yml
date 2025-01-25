@@ -8,3 +8,4 @@ dependencies:
   - diamond=2.0.4
   - checkm2=1.0.2
   - coverm=0.7.0
+  - gtdbtk=2.4.0

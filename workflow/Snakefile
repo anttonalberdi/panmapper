@@ -5,12 +5,17 @@ from glob import glob
 # Configurations
 configfile: "config/config.yaml"
 
+# Database directories
+CHECKM2_DATABASE = config["checkm2_database"]
+GTDB_DATABASE = config["gtdb_database"]
+
 # Input and output directories
 GENOME_DIR = config["genome_dir"]
 READS_DIR = config["reads_dir"]
+TEMP_DIR = config["temp_dir"]
 OUTPUT_DIR = config["output_dir"]
 
-# Directories
+# Output subdirectories
 DREP_DIR = f"{OUTPUT_DIR}/drep"
 PRODIGAL_DIR = f"{OUTPUT_DIR}/prodigal"
 CLUSTER_DIR = f"{OUTPUT_DIR}/clusters"
@@ -37,9 +42,12 @@ rule all:
     input:
         expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
         f"{DREP_DIR}",
-        f"{CLUSTER_DIR}/all_clusters.fna",
+        f"{BOWTIE_DIR}/all_clusters.fna",
+#        f"{CHECKM2_DIR}",
+        f"{GTDBTK_DIR}",
         expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
-        expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples)
+        expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
+        f"{COVERM_DIR}/all_clusters.tsv"
 
 rule run_drep:
     input:
@@ -47,7 +55,7 @@ rule run_drep:
     output:
         directory(f"{DREP_DIR}")
     conda:
-        "../environments/clustering.yml"
+        "environments/clustering.yml"
     shell:
         """
         dRep compare {output} -g {input}
@@ -58,11 +66,12 @@ rule run_prodigal:
         f"{GENOME_DIR}/{{genome}}.fna"
     output:
         f"{PRODIGAL_DIR}/{{genome}}.fna"
+    threads: 1
     conda:
-        "../environments/clustering.yml"
+        "environments/clustering.yml"
     shell:
         """
-        prodigal -i {input} -a {output}
+        prodigal -i {input} -d {output}
         """
 
 # Precompute unique_clusters based on the Cdb.csv file
@@ -75,9 +84,10 @@ else:
 rule cluster_genomes:
     input:
         csv=f"{DREP_DIR}/data_tables/Cdb.csv",
-        prodigal_files=expand("genes/{genome}.fna", genome=genomes)
+        prodigal_files=expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes)
     output:
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        touch(f"{CLUSTER_DIR}/done.txt")
     run:
         # Read clustering information from the CSV
         df = pd.read_csv(input.csv)
@@ -89,8 +99,8 @@ rule cluster_genomes:
         for cluster_id, genome_list in cluster_dict.items():
             cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.fna"
             with open(cluster_file, "w") as out_file:
-                for genome in genome_list:
-                    prodigal_file = f"genes/{genome}"
+                for genome_id in genome_list:
+                    prodigal_file = f"{PRODIGAL_DIR}/{genome_id}"
                     if prodigal_file in input.prodigal_files:
                         with open(prodigal_file, "r") as f:
                             out_file.write(f.read())
@@ -103,8 +113,9 @@ rule run_mmseqs:
         rep_tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.tsv"
     params:
         tmp=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_tmp"
+    threads: 1
     conda:
-        "../environments/clustering.yml"
+        "environments/clustering.yml"
     shell:
         """
         mmseqs easy-linclust {input.cluster_genes} {MMSEQS_DIR}/cluster_{wildcards.cluster_id}_output {params.tmp} --min-seq-id 0.8 --cov-mode 1 -c 0.8
@@ -114,15 +125,52 @@ rule run_mmseqs:
         rm -rf {params.tmp}
         """
 
-#rule run_checkm2:
-#rule run_gtdbtk:
+rule run_checkm2:
+    input:
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+    output:
+        directory(f"{CHECKM2_DIR}")
+    params:
+        database=f"{CHECKM2_DATABASE}"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        checkm2 predict --threads {threads} --input {input} --output-directory {output} --database_path {params.database} --lowmem
+        """
+
+rule run_gtdbtk:
+    input:
+        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        f"{CLUSTER_DIR}/done.txt"
+    output:
+        directory(f"{GTDBTK_DIR}")
+    conda:
+        "environments/quantification.yml"
+    params:
+        inputdir=f"{CLUSTER_DIR}",
+        database=f"{GTDB_DATABASE}",
+        tmp=f"{TEMP_DIR}"
+    shell:
+        """
+        export GTDBTK_DATA_PATH={params.database}
+        mkdir {output}
+        gtdbtk classify_wf \
+            --genome_dir {params.inputdir} \
+            --extension fna \
+            --out_dir {output} \
+            --tmpdir {params.tmp} \
+            --cpus {threads} \
+            --skip_ani_screen
+        """
+
 #rule run_kofams:
 
 rule concatenate_clusters:
     input:
         expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
     output:
-        f"{CLUSTER_DIR}/all_clusters.fna"
+        f"{BOWTIE_DIR}/all_clusters.fna"
     run:
         with open(output[0], "w") as out_file:
             for cluster_file in input:
@@ -131,11 +179,12 @@ rule concatenate_clusters:
 
 rule build_bowtie_index:
     input:
-        f"{CLUSTER_DIR}/all_clusters.fna"
+        f"{BOWTIE_DIR}/all_clusters.fna"
     output:
         expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"])
     conda:
-        "../environments/quantification.yml"
+        "environments/quantification.yml"
+    threads: 1
     shell:
         """
         mkdir -p {BOWTIE_DIR}
@@ -149,9 +198,23 @@ rule map_reads:
         r2=f"{READS_DIR}/{{sample}}_2.fq.gz"
     output:
         f"{BOWTIE_DIR}/{{sample}}.bam"
+    threads: 1
     conda:
-        "../environments/quantification.yml"
+        "environments/quantification.yml"
     shell:
         """
         bowtie2 -x {BOWTIE_DIR}/all_clusters -1 {input.r1} -2 {input.r2} | samtools view -bS - > {output}
+        """
+
+rule quantify_reads:
+    input:
+        expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples)
+    output:
+        f"{COVERM_DIR}/all_clusters.tsv"
+    threads: 1
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        coverm contig -m count covered_bases -b {input} -t {threads} -o {output}
         """
