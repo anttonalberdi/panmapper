@@ -30,6 +30,7 @@ COVERM_DIR = f"{OUTPUT_DIR}/coverm"
 genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
 samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
 
+
 #Read the primary_cluster column from the Cdb.csv file produced by drep and return unique clusters
 def get_unique_clusters(cdb_file):
     if not os.path.exists(cdb_file):
@@ -43,7 +44,7 @@ rule all:
         expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
         f"{DREP_DIR}",
         f"{BOWTIE_DIR}/all_clusters.fna",
-#        f"{CHECKM2_DIR}",
+        f"{CHECKM2_DIR}",
         f"{GTDBTK_DIR}",
         expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
         expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
@@ -53,12 +54,13 @@ rule run_drep:
     input:
         genomes=expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
     output:
-        directory(f"{DREP_DIR}")
+        dir=directory(f"{DREP_DIR}"),
+        csv=f"{DREP_DIR}/data_tables/Cdb.csv"
     conda:
         "environments/clustering.yml"
     shell:
         """
-        dRep compare {output} -g {input}
+        dRep compare {output.dir} -g {input}
         """
 
 rule run_prodigal:
@@ -66,7 +68,6 @@ rule run_prodigal:
         f"{GENOME_DIR}/{{genome}}.fna"
     output:
         f"{PRODIGAL_DIR}/{{genome}}.fna"
-    threads: 1
     conda:
         "environments/clustering.yml"
     shell:
@@ -113,7 +114,6 @@ rule run_mmseqs:
         rep_tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_genes_drep.tsv"
     params:
         tmp=f"{MMSEQS_DIR}/cluster_{{cluster_id}}_tmp"
-    threads: 1
     conda:
         "environments/clustering.yml"
     shell:
@@ -127,7 +127,8 @@ rule run_mmseqs:
 
 rule run_checkm2:
     input:
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        placeholder=f"{CLUSTER_DIR}/done.txt"
     output:
         directory(f"{CHECKM2_DIR}")
     params:
@@ -136,21 +137,21 @@ rule run_checkm2:
         "environments/quantification.yml"
     shell:
         """
-        checkm2 predict --threads {threads} --input {input} --output-directory {output} --database_path {params.database} --lowmem
+        checkm2 predict --threads {threads} --input {input.clusters} --output-directory {output} --database_path {params.database}
         """
 
 rule run_gtdbtk:
     input:
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
-        f"{CLUSTER_DIR}/done.txt"
+        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        placeholder=f"{CLUSTER_DIR}/done.txt"
     output:
         directory(f"{GTDBTK_DIR}")
-    conda:
-        "environments/quantification.yml"
     params:
         inputdir=f"{CLUSTER_DIR}",
         database=f"{GTDB_DATABASE}",
         tmp=f"{TEMP_DIR}"
+    conda:
+        "environments/quantification.yml"
     shell:
         """
         export GTDBTK_DATA_PATH={params.database}
@@ -168,12 +169,13 @@ rule run_gtdbtk:
 
 rule concatenate_clusters:
     input:
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        clusters=expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
+        placeholder=f"{CLUSTER_DIR}/done.txt"
     output:
         f"{BOWTIE_DIR}/all_clusters.fna"
     run:
         with open(output[0], "w") as out_file:
-            for cluster_file in input:
+            for cluster_file in input.clusters:
                 with open(cluster_file, "r") as in_file:
                     out_file.write(in_file.read())
 
@@ -184,7 +186,6 @@ rule build_bowtie_index:
         expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"])
     conda:
         "environments/quantification.yml"
-    threads: 1
     shell:
         """
         mkdir -p {BOWTIE_DIR}
@@ -198,12 +199,11 @@ rule map_reads:
         r2=f"{READS_DIR}/{{sample}}_2.fq.gz"
     output:
         f"{BOWTIE_DIR}/{{sample}}.bam"
-    threads: 1
     conda:
         "environments/quantification.yml"
     shell:
         """
-        bowtie2 -x {BOWTIE_DIR}/all_clusters -1 {input.r1} -2 {input.r2} | samtools view -bS - > {output}
+        bowtie2 -x {BOWTIE_DIR}/all_clusters -1 {input.r1} -2 {input.r2} | samtools view -bS - | samtools sort -o {output}
         """
 
 rule quantify_reads:
@@ -211,7 +211,6 @@ rule quantify_reads:
         expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples)
     output:
         f"{COVERM_DIR}/all_clusters.tsv"
-    threads: 1
     conda:
         "environments/quantification.yml"
     shell:

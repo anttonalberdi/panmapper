@@ -4,7 +4,7 @@ latency-wait: 60
 use-conda: true
 rerun-incomplete: true
 keep-going: false
-attempt: 3
+retries: 3
 
 default-resources:
     mem_mb: 8 * 1024
@@ -25,7 +25,7 @@ set-threads:
 
 set-resources:
     run_drep:
-        mem_mb: 8 * 1024
+        mem_mb: 8 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)
     run_prodigal:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
@@ -34,14 +34,14 @@ set-resources:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 5 * 2 ** (attempt - 1)
     run_mmseqs:
-        mem_mb: 32 * 1024
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)
     run_checkm2:
-        mem_mb: 32 * 1024
-        runtime: 10 * 2 ** (attempt - 1)
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
+        runtime: 30 * 2 ** (attempt - 1)
     run_gtdbtk:
-        mem_mb: 8 * 1024
-        runtime: 10 * 2 ** (attempt - 1)
+        mem_mb: 64 * 1024 * 2 ** (attempt - 1)
+        runtime: 30 * 2 ** (attempt - 1)
     concatenate_clusters:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
         runtime: 5 * 2 ** (attempt - 1)
@@ -49,8 +49,8 @@ set-resources:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 5 * 2 ** (attempt - 1)
     map_reads:
-        mem_mb: 32 * 1024
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)
     quantify_reads:
-        mem_mb: 32 * 1024
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)
