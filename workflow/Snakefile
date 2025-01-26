@@ -29,6 +29,7 @@ GTDBTK_DIR = f"{OUTPUT_DIR}/gtdbtk"
 KOFAMS_DIR = f"{OUTPUT_DIR}/kofams"
 BOWTIE_DIR = f"{OUTPUT_DIR}/bowtie"
 COVERM_DIR = f"{OUTPUT_DIR}/coverm"
+FIGURES_DIR = f"{OUTPUT_DIR}/figures"
 FINAL_DIR = f"{OUTPUT_DIR}/final"
 
 # Infer genomes and samples
@@ -145,14 +146,19 @@ def get_cluster_fna_sep(wildcards):
 def get_gene_faa_sep(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    return f"{MMSEQS_DIR}/cluster_{wildcards.cluster_id}.fna"
+    return f"{MMSEQS_DIR}/cluster_{wildcards.cluster_id}.faa"
+
+def get_gene_tsv_sep(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return f"{MMSEQS_DIR}/cluster_{wildcards.cluster_id}.tsv"
 
 ## These functions return a list of all desired files, and can be called directly in the input
 
 def get_gene_tsv(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    return expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
+    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
 
 def get_gene_fna(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
@@ -162,7 +168,7 @@ def get_gene_fna(wildcards):
 def get_gene_faa(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=cluster_ids)
+    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa", cluster_id=cluster_ids)
 
 def get_kofams_tsv(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
@@ -172,6 +178,17 @@ def get_kofams_tsv(wildcards):
 ####
 #### The rules below are only executed after the checkpoint
 ####
+
+rule create_pangenome_heatmap:
+    input:
+        genome=f"{FINAL_DIR}/genome_gene.csv",
+        gene=lambda wildcards: get_gene_tsv_sep(wildcards)
+    output:
+        f"{FIGURES_DIR}/cluster_{{cluster_id}}_original.pdf"
+    shell:
+        """
+        python workflow/scripts/figure_pangenome_reference.py {input.genome} {input.gene} {output}
+        """
 
 # Dereplicate the genes to obtain a list of reference genes for the cluster
 rule run_mmseqs:

@@ -42,7 +42,7 @@ set-resources:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 60 * 2 ** (attempt - 1)
     run_gtdbtk:
-        mem_mb: 64 * 1024 * 2 ** (attempt - 1)
+        mem_mb: 256 * 1024 * 2 ** (attempt - 1)
         runtime: 60 * 2 ** (attempt - 1)
     run_kofams:
         mem_mb: 16 * 1024 * 2 ** (attempt - 1)

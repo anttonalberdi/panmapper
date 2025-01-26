@@ -10,7 +10,7 @@ def main(input_files, output_file):
         cluster_name = os.path.basename(file_path).replace(".tsv", "")
 
         # Read the .tsv file into a DataFrame
-        df = pd.read_csv(file_path, sep="\t", header=None, names=["reference", "redundant"])
+        df = pd.read_csv(file_path, sep="\t", header=None, names=["reference", "all"])
 
         # Add the cluster column
         df["cluster"] = cluster_name
