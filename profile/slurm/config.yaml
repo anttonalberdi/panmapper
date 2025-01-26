@@ -37,7 +37,7 @@ set-resources:
         runtime: 5 * 2 ** (attempt - 1)
     run_mmseqs:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 10 * 2 ** (attempt - 1)
+        runtime: 30 * 2 ** (attempt - 1)
     run_checkm2:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 30 * 2 ** (attempt - 1)
@@ -49,16 +49,16 @@ set-resources:
         runtime: 120 * 2 ** (attempt - 1)
     merge_kofams:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
-        runtime: 5 * 2 ** (attempt - 1)
+        runtime: 10 * 2 ** (attempt - 1)
     concatenate_clusters:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
-        runtime: 5 * 2 ** (attempt - 1)
+        runtime: 10 * 2 ** (attempt - 1)
     build_bowtie_index:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 15 * 2 ** (attempt - 1)
+        runtime: 60 * 2 ** (attempt - 1)
     map_reads:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 10 * 2 ** (attempt - 1)
+        runtime: 60 * 2 ** (attempt - 1)
     quantify_reads:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 10 * 2 ** (attempt - 1)
+        runtime: 60 * 2 ** (attempt - 1)

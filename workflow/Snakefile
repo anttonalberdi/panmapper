@@ -1,8 +1,11 @@
+#### Load python modules
+
 import os
 import pandas as pd
 from glob import glob
 
-# Configurations
+#### Configuration
+
 configfile: "config/config.yaml"
 
 # Database directories
@@ -32,42 +35,18 @@ FINAL_DIR = f"{OUTPUT_DIR}/final"
 genomes, = glob_wildcards(f"{GENOME_DIR}/{{genome}}.fna")
 samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
 
-#Read the secondary_cluster column from the Cdb.csv file produced by drep and return unique clusters
-def get_unique_clusters(cdb_file):
-    if not os.path.exists(cdb_file):
-        return []  # Return an empty list if the file doesn't exist yet
-    df = pd.read_csv(cdb_file)
-    return df["secondary_cluster"].unique().tolist()
+####  Rules
 
-# Rules
+# Final files that need to be generated
 rule all:
     input:
-        expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes),
-        f"{FINAL_DIR}/genome_contig.csv",
-        f"{DREP_DIR}",
-        f"{BOWTIE_DIR}/all_clusters.fna",
-        #f"{CHECKM2_DIR}",
-        #f"{GTDBTK_DIR}",
-        f"{KOFAMS_DIR}/all_clusters.faa",
-        #expand(f"{BOWTIE_DIR}/all_clusters.1.bt2", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
-        #expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples),
+        f"{CHECKM2_DIR}",
+        f"{GTDBTK_DIR}",
         f"{FINAL_DIR}/cluster_info.csv",
         f"{FINAL_DIR}/counts.csv",
         f"{FINAL_DIR}/coverage.csv"
 
-rule run_drep:
-    input:
-        genomes=expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
-    output:
-        dir=directory(f"{DREP_DIR}"),
-        csv=f"{DREP_DIR}/data_tables/Cdb.csv"
-    conda:
-        "environments/clustering.yml"
-    shell:
-        """
-        dRep compare {output.dir} -g {input}
-        """
-
+# Predict genes from all original genomes
 rule run_prodigal:
     input:
         f"{GENOME_DIR}/{{genome}}.fna"
@@ -81,6 +60,21 @@ rule run_prodigal:
         prodigal -i {input} -d {output.nt} -a {output.aa}
         """
 
+# Calculate ANI values to generate clusters. Clusters are outputed in the Cdb.csv file.
+rule run_drep:
+    input:
+        genomes=expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
+    output:
+        dir=directory(f"{DREP_DIR}"),
+        csv=f"{DREP_DIR}/data_tables/Cdb.csv"
+    conda:
+        "environments/clustering.yml"
+    shell:
+        """
+        dRep compare {output.dir} -g {input}
+        """
+
+# Create a reference table with genome and gene names to trace orgigin of genes
 rule create_genome_gene_table:
     input:
         expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes)
@@ -91,23 +85,24 @@ rule create_genome_gene_table:
         python workflow/scripts/genome_gene_table.py {input} {output}
         """
 
-# Precompute unique_clusters based on the Cdb.csv file
-if os.path.exists(f"{DREP_DIR}/data_tables/Cdb.csv"):
-    cdb_df = pd.read_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    unique_clusters = cdb_df["secondary_cluster"].unique()
-else:
-    unique_clusters = []
+# Cluster original genomes into group of genomes to be dereplicated using mmseqs
+# Note this this a checkpoint. The outputs of this rule cannot be predicted, as
+# they depend on the content of the Cdb.csv file generated in the previous drep rule.
+# In consequence, the checkpoint forces snakemake to re-create the pipeline structure
+# and consider the new wildards. Note the use of functions to generate the dynamic
+# inputs for the direct dependencies of this rule in the subsequent steps.
 
-rule cluster_genomes:
+checkpoint cluster_genomes:
     input:
         csv=f"{DREP_DIR}/data_tables/Cdb.csv",
         nt=expand(f"{PRODIGAL_DIR}/{{genome}}.fna", genome=genomes),
         aa=expand(f"{PRODIGAL_DIR}/{{genome}}.faa", genome=genomes)
     output:
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters),
-        expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters),
-        touch(f"{CLUSTER_DIR}/done.txt")
+        directory(CLUSTER_DIR)
     run:
+        import pandas as pd
+        import os
+
         # Read clustering information from the CSV
         df = pd.read_csv(input.csv)
         cluster_dict = df.groupby("secondary_cluster")["genome"].apply(list).to_dict()
@@ -116,27 +111,72 @@ rule cluster_genomes:
 
         # Create cluster files by concatenating genomes
         for cluster_id, genome_list in cluster_dict.items():
-            #Generate nucleotide sequences
-            cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.fna"
-            with open(cluster_file, "w") as out_file:
+            # Generate nucleotide sequences
+            cluster_file_nt = f"{CLUSTER_DIR}/cluster_{cluster_id}.fna"
+            with open(cluster_file_nt, "w") as out_file:
                 for genome_id in genome_list:
                     prodigal_file = f"{PRODIGAL_DIR}/{genome_id}"
                     if prodigal_file in input.nt:
                         with open(prodigal_file, "r") as f:
                             out_file.write(f.read())
-            #Generate amino acid sequences
-            cluster_file = f"{CLUSTER_DIR}/cluster_{cluster_id}.faa"
-            with open(cluster_file, "w") as out_file:
+            # Generate amino acid sequences
+            cluster_file_aa = f"{CLUSTER_DIR}/cluster_{cluster_id}.faa"
+            with open(cluster_file_aa, "w") as out_file:
                 for genome_id in genome_list:
-                    genome_id2 = genome_id.replace(".fna", ".faa")
-                    prodigal_file2 = f"{PRODIGAL_DIR}/{genome_id2}"
-                    if prodigal_file2 in input.aa:
-                        with open(prodigal_file2, "r") as f:
+                    genome_id_aa = genome_id.replace(".fna", ".faa")
+                    prodigal_file_aa = f"{PRODIGAL_DIR}/{genome_id_aa}"
+                    if prodigal_file_aa in input.aa:
+                        with open(prodigal_file_aa, "r") as f:
                             out_file.write(f.read())
+
+# Functions to define the input files dynamically.
+
+def get_cluster_ids_from_csv(csv_path):
+    df = pd.read_csv(csv_path)
+    return df["secondary_cluster"].unique()
+
+## These functions return each file separately, and need to be combined with a lambda expression in the input
+
+def get_cluster_fna_sep(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return f"{CLUSTER_DIR}/cluster_{wildcards.cluster_id}.fna"
+
+def get_gene_faa_sep(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return f"{MMSEQS_DIR}/cluster_{wildcards.cluster_id}.fna"
+
+## These functions return a list of all desired files, and can be called directly in the input
+
+def get_gene_tsv(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return expand(f"{CLUSTER_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
+
+def get_gene_fna(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=cluster_ids)
+
+def get_gene_faa(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=cluster_ids)
+
+def get_kofams_tsv(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return expand(f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
+
+####
+#### The rules below are only executed after the checkpoint
+####
+
+# Dereplicate the genes to obtain a list of reference genes for the cluster
 rule run_mmseqs:
     input:
-        cluster_genes=f"{CLUSTER_DIR}/cluster_{{cluster_id}}.fna",
-        placeholder=f"{CLUSTER_DIR}/done.txt"
+        cluster_genes=lambda wildcards: get_cluster_fna_sep(wildcards)
     output:
         fna=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna",
         tsv=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv"
@@ -153,10 +193,10 @@ rule run_mmseqs:
         rm -rf {params.tmp}
         """
 
-
+# Translate gene nucleotide sequences to amino acid sequences
 rule translate_genes:
     input:
-        f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna"
+        get_gene_fna
     output:
         f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
     shell:
@@ -164,9 +204,10 @@ rule translate_genes:
         python workflow/scripts/translate_genes.py {input} {output}
         """
 
+# Run checkm2 to assess properties of the cluster
 rule run_checkm2:
     input:
-        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        clusters=get_gene_fna
     output:
         directory(f"{CHECKM2_DIR}")
     params:
@@ -178,9 +219,10 @@ rule run_checkm2:
         checkm2 predict --threads {threads} --input {input.clusters} --output-directory {output} --database_path {params.database}
         """
 
+# Run gtdbtk to assign taxonomy to the cluster
 rule run_gtdbtk:
     input:
-        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        clusters=get_gene_fna
     output:
         directory(f"{GTDBTK_DIR}")
     params:
@@ -202,9 +244,23 @@ rule run_gtdbtk:
             --skip_ani_screen
         """
 
+# Cocatenate gene dereplication map files
+rule concatenate_clusters:
+    input:
+        clusters=get_gene_tsv
+    output:
+        f"{MMSEQS_DIR}/all_clusters.tsv"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        python workflow/scripts/concatenate_clusters.py {input} {output}
+        """
+
+# Cocatenate dereplicated nucleotide gene sequences
 rule concatenate_clusters_nt:
     input:
-        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.fna", cluster_id=unique_clusters)
+        clusters=get_gene_fna
     output:
         f"{BOWTIE_DIR}/all_clusters.fna"
     run:
@@ -213,9 +269,10 @@ rule concatenate_clusters_nt:
                 with open(cluster_file, "r") as in_file:
                     out_file.write(in_file.read())
 
+# Cocatenate dereplicated amino acid gene sequences
 rule concatenate_clusters_aa:
     input:
-        clusters=expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa", cluster_id=unique_clusters)
+        clusters=get_gene_faa
     output:
         f"{KOFAMS_DIR}/all_clusters.faa"
     run:
@@ -224,9 +281,10 @@ rule concatenate_clusters_aa:
                 with open(cluster_file, "r") as in_file:
                     out_file.write(in_file.read())
 
+# Run KEGG annotation of dereplicated genes
 rule run_kofams:
     input:
-        aa=f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
+        aa=lambda wildcards: get_gene_faa_sep(wildcards)
     output:
         txt=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.txt",
         tsv=f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv"
@@ -239,9 +297,10 @@ rule run_kofams:
         hmmscan -o {output.txt} --tblout {output.tsv} -E 1e-5 --noali {params.database} {input.aa}
         """
 
+# Merge KEGG annotations into a single file and select the best annotation per gene
 rule merge_kofams:
     input:
-        expand(f"{KOFAMS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=unique_clusters)
+        get_kofams_tsv
     output:
         tsv=f"{KOFAMS_DIR}/all_clusters.tsv",
         csv=f"{KOFAMS_DIR}/all_clusters.csv"
@@ -255,6 +314,7 @@ rule merge_kofams:
         python workflow/scripts/select_ko.py {output.tsv} {output.csv}
         """
 
+# Build bowtie2 index to map reads against the cluster reference genes
 rule build_bowtie_index:
     input:
         f"{BOWTIE_DIR}/all_clusters.fna"
@@ -270,6 +330,7 @@ rule build_bowtie_index:
         python workflow/scripts/calculate_gene_lengths.py {input} {output.lengths}
         """
 
+# Map reads against the cluster reference genes
 rule map_reads:
     input:
         index=expand(f"{BOWTIE_DIR}/all_clusters.{{ext}}", ext=["1.bt2", "2.bt2", "3.bt2", "4.bt2", "rev.1.bt2", "rev.2.bt2"]),
@@ -284,6 +345,7 @@ rule map_reads:
         bowtie2 -x {BOWTIE_DIR}/all_clusters -1 {input.r1} -2 {input.r2} | samtools view -bS - | samtools sort -o {output}
         """
 
+# Calculate mapping results into tables
 rule quantify_reads:
     input:
         expand(f"{BOWTIE_DIR}/{{sample}}.bam", sample=samples)
@@ -296,10 +358,11 @@ rule quantify_reads:
         coverm contig -m count covered_bases -b {input} -t {threads} -o {output}
         """
 
+# Generate the final tables using the information generated throughout the pipeline
 rule final_files:
     input:
         genomes=f"{FINAL_DIR}/genome_gene.csv",
-        lengths=f"{FINAL_DIR}/contig_lengths.csv",
+        lengths=f"{FINAL_DIR}/gene_lengths.csv",
         coverm=f"{COVERM_DIR}/all_clusters.tsv",
         clusters=f"{DREP_DIR}/data_tables/Cdb.csv",
         kofams=f"{KOFAMS_DIR}/all_clusters.csv"
@@ -311,6 +374,7 @@ rule final_files:
         "environments/quantification.yml"
     shell:
         """
+        #add pangene: f"{MMSEQS_DIR}/all_clusters.tsv"
         python workflow/scripts/separate_coverm.py {input.coverm} {output.counts} {output.coverage}
         python workflow/scripts/pangenome_info.py {input.clusters} {input.genomes} {input.lengths} {input.kofams} {output.info}
         """
