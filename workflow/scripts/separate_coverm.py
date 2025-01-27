@@ -28,8 +28,8 @@ def main():
     covered_bases_df.columns = [col.replace(" Covered Bases", "") for col in covered_bases_df.columns]
 
     # Write the resulting DataFrames to separate files
-    read_counts_df.to_csv(output_read_counts, index=False, sep="\t")
-    covered_bases_df.to_csv(output_covered_bases, index=False, sep="\t")
+    read_counts_df.to_csv(output_read_counts, index=False)
+    covered_bases_df.to_csv(output_covered_bases, index=False)
 
 if __name__ == "__main__":
     main()

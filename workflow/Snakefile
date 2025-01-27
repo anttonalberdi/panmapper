@@ -24,7 +24,8 @@ DREP_DIR = f"{OUTPUT_DIR}/drep"
 PRODIGAL_DIR = f"{OUTPUT_DIR}/prodigal"
 CLUSTER_DIR = f"{OUTPUT_DIR}/clusters"
 MMSEQS_DIR = f"{OUTPUT_DIR}/mmseqs"
-CHECKM2_DIR = f"{OUTPUT_DIR}/checkm2"
+CHECKM2_GENOMES_DIR = f"{OUTPUT_DIR}/checkm2_genomes"
+CHECKM2_CLUSTERS_DIR = f"{OUTPUT_DIR}/checkm2_clusters"
 GTDBTK_DIR = f"{OUTPUT_DIR}/gtdbtk"
 KOFAMS_DIR = f"{OUTPUT_DIR}/kofams"
 BOWTIE_DIR = f"{OUTPUT_DIR}/bowtie"
@@ -41,11 +42,17 @@ samples, = glob_wildcards(f"{READS_DIR}/{{sample}}_1.fq.gz")
 # Final files that need to be generated
 rule all:
     input:
-        f"{CHECKM2_DIR}",
+        f"{CHECKM2_GENOMES_DIR}/quality_report.tsv",
+        f"{CHECKM2_CLUSTERS_DIR}/quality_report.tsv",
         f"{GTDBTK_DIR}",
         f"{FINAL_DIR}/cluster_info.csv",
-        f"{FINAL_DIR}/counts.csv",
-        f"{FINAL_DIR}/coverage.csv"
+        f"{FINAL_DIR}/gene_counts.csv",
+        f"{FINAL_DIR}/gene_coverage.csv",
+        f"{FINAL_DIR}/cluster_counts.csv",
+        f"{FINAL_DIR}/cluster_coverage.csv",
+        f"{FIGURES_DIR}/heatmap_genes.pdf",
+        f"{FIGURES_DIR}/heatmap_counts.pdf"
+        #f"{FIGURES_DIR}/heatmap_kegg.pdf" # not working
 
 # Predict genes from all original genomes
 rule run_prodigal:
@@ -59,6 +66,22 @@ rule run_prodigal:
     shell:
         """
         prodigal -i {input} -d {output.nt} -a {output.aa}
+        """
+
+# Run checkm2 in the original genomes
+rule run_checkm2_genomes:
+    input:
+        expand(f"{GENOME_DIR}/{{genome}}.fna", genome=genomes)
+    output:
+        directory=directory(f"{CHECKM2_GENOMES_DIR}"),
+        report=f"{CHECKM2_GENOMES_DIR}/quality_report.tsv"
+    params:
+        database=f"{CHECKM2_DATABASE}"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        checkm2 predict --threads {threads} --input {input} --output-directory {output.directory} --database_path {params.database}
         """
 
 # Calculate ANI values to generate clusters. Clusters are outputed in the Cdb.csv file.
@@ -143,6 +166,11 @@ def get_cluster_fna_sep(wildcards):
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
     return f"{CLUSTER_DIR}/cluster_{wildcards.cluster_id}.fna"
 
+def get_gene_fna_sep(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return f"{MMSEQS_DIR}/cluster_{wildcards.cluster_id}.fna"
+
 def get_gene_faa_sep(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
@@ -155,11 +183,6 @@ def get_gene_tsv_sep(wildcards):
 
 ## These functions return a list of all desired files, and can be called directly in the input
 
-def get_gene_tsv(wildcards):
-    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
-    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
-    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
-
 def get_gene_fna(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
@@ -169,6 +192,11 @@ def get_gene_faa(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
     cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
     return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa", cluster_id=cluster_ids)
+
+def get_gene_tsv(wildcards):
+    checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
+    cluster_ids = get_cluster_ids_from_csv(f"{DREP_DIR}/data_tables/Cdb.csv")
+    return expand(f"{MMSEQS_DIR}/cluster_{{cluster_id}}.tsv", cluster_id=cluster_ids)
 
 def get_kofams_tsv(wildcards):
     checkpoint_output = checkpoints.cluster_genomes.get(**wildcards).output[0]
@@ -182,12 +210,14 @@ def get_kofams_tsv(wildcards):
 rule create_pangenome_heatmap:
     input:
         genome=f"{FINAL_DIR}/genome_gene.csv",
-        gene=lambda wildcards: get_gene_tsv_sep(wildcards)
+        gene=get_gene_tsv
     output:
-        f"{FIGURES_DIR}/cluster_{{cluster_id}}_original.pdf"
+        f"{FIGURES_DIR}/heatmap_genes.pdf"
+    conda:
+        "environments/clustering.yml"
     shell:
         """
-        python workflow/scripts/figure_pangenome_reference.py {input.genome} {input.gene} {output}
+        python workflow/scripts/figure_pangenome_genes.py {input.genome} {input.gene} {output}
         """
 
 # Dereplicate the genes to obtain a list of reference genes for the cluster
@@ -213,7 +243,7 @@ rule run_mmseqs:
 # Translate gene nucleotide sequences to amino acid sequences
 rule translate_genes:
     input:
-        get_gene_fna
+        get_gene_fna_sep
     output:
         f"{MMSEQS_DIR}/cluster_{{cluster_id}}.faa"
     shell:
@@ -222,18 +252,19 @@ rule translate_genes:
         """
 
 # Run checkm2 to assess properties of the cluster
-rule run_checkm2:
+rule run_checkm2_clusters:
     input:
-        clusters=get_gene_fna
+        get_gene_fna
     output:
-        directory(f"{CHECKM2_DIR}")
+        directory=directory(f"{CHECKM2_CLUSTERS_DIR}"),
+        report=f"{CHECKM2_CLUSTERS_DIR}/quality_report.tsv"
     params:
         database=f"{CHECKM2_DATABASE}"
     conda:
         "environments/quantification.yml"
     shell:
         """
-        checkm2 predict --threads {threads} --input {input.clusters} --output-directory {output} --database_path {params.database}
+        checkm2 predict --threads {threads} --input {input} --output-directory {output.directory} --database_path {params.database}
         """
 
 # Run gtdbtk to assign taxonomy to the cluster
@@ -331,6 +362,20 @@ rule merge_kofams:
         python workflow/scripts/select_ko.py {output.tsv} {output.csv}
         """
 
+rule create_pangenome_heatmap_kegg:
+    input:
+        genome=f"{FINAL_DIR}/genome_gene.csv",
+        gene=get_gene_tsv,
+        info=f"{FINAL_DIR}/cluster_info.csv"
+    output:
+        f"{FIGURES_DIR}/heatmap_kegg.pdf"
+    conda:
+        "environments/clustering.yml"
+    shell:
+        """
+        python workflow/scripts/figure_pangenome_kegg.py {input.genome} {input.info} {input.gene} {output}
+        """
+
 # Build bowtie2 index to map reads against the cluster reference genes
 rule build_bowtie_index:
     input:
@@ -376,7 +421,7 @@ rule quantify_reads:
         """
 
 # Generate the final tables using the information generated throughout the pipeline
-rule final_files:
+rule final_tables:
     input:
         genomes=f"{FINAL_DIR}/genome_gene.csv",
         lengths=f"{FINAL_DIR}/gene_lengths.csv",
@@ -385,13 +430,41 @@ rule final_files:
         kofams=f"{KOFAMS_DIR}/all_clusters.csv"
     output:
         info=f"{FINAL_DIR}/cluster_info.csv",
-        counts=f"{FINAL_DIR}/counts.csv",
-        coverage=f"{FINAL_DIR}/coverage.csv"
+        counts=f"{FINAL_DIR}/gene_counts.csv",
+        coverage=f"{FINAL_DIR}/gene_coverage.csv"
     conda:
         "environments/quantification.yml"
     shell:
         """
-        #add pangene: f"{MMSEQS_DIR}/all_clusters.tsv"
         python workflow/scripts/separate_coverm.py {input.coverm} {output.counts} {output.coverage}
         python workflow/scripts/pangenome_info.py {input.clusters} {input.genomes} {input.lengths} {input.kofams} {output.info}
+        """
+
+rule final_figures:
+    input:
+        info=f"{FINAL_DIR}/cluster_info.csv",
+        counts=f"{FINAL_DIR}/gene_counts.csv",
+    output:
+        f"{FIGURES_DIR}/heatmap_counts.pdf"
+    conda:
+        "environments/clustering.yml"
+    shell:
+        """
+        python workflow/scripts/figure_pangenome_counts.py {input.info} {input.counts} {output}
+        """
+
+rule aggregate_by_cluster:
+    input:
+        info=f"{FINAL_DIR}/cluster_info.csv",
+        counts=f"{FINAL_DIR}/gene_counts.csv",
+        coverage=f"{FINAL_DIR}/gene_coverage.csv"
+    output:
+        counts=f"{FINAL_DIR}/cluster_counts.csv",
+        coverage=f"{FINAL_DIR}/cluster_coverage.csv"
+    conda:
+        "environments/quantification.yml"
+    shell:
+        """
+        python workflow/scripts/aggregate_by_cluster.py {input.info} {input.counts} {output.counts}
+        python workflow/scripts/aggregate_by_cluster.py {input.info} {input.coverage} {output.coverage}
         """

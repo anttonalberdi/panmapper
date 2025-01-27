@@ -38,7 +38,10 @@ set-resources:
     run_mmseqs:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 30 * 2 ** (attempt - 1)
-    run_checkm2:
+    run_checkm2_genomes:
+        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
+        runtime: 60 * 2 ** (attempt - 1)
+    run_checkm2_clusters:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 60 * 2 ** (attempt - 1)
     run_gtdbtk:
