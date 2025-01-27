@@ -41,9 +41,6 @@ set-resources:
     run_checkm2_clusters:
         mem_mb: 8 * 1024
         runtime: 60 * 2 ** (attempt - 1)
-    run_gtdbtk:
-        mem_mb: 8 * 1024
-        runtime: 30 * 2 ** (attempt - 1)
     run_kofams:
         mem_mb: 8 * 1024
         runtime: 120 * 2 ** (attempt - 1)
@@ -56,9 +53,6 @@ set-resources:
     build_bowtie_index:
         mem_mb: 8 * 1024
         runtime: 15 * 2 ** (attempt - 1)
-    map_reads:
-        mem_mb: 8 * 1024
-        runtime: 10 * 2 ** (attempt - 1)
     quantify_reads:
         mem_mb: 8 * 1024
         runtime: 10 * 2 ** (attempt - 1)

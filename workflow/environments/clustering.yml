@@ -11,6 +11,6 @@ dependencies:
   - mmseqs2=17.b804f
   - emboss=6.6.0
   - biopython=1.83
+  - fastcluster=1.2.6
   - pip:
     - drep
-    - fastcluster

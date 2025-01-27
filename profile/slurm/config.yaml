@@ -26,9 +26,6 @@ set-threads:
     quantify_reads: 1
 
 set-resources:
-    run_drep:
-        mem_mb: 8 * 1024 * 2 ** (attempt - 1)
-        runtime: 30 * 2 ** (attempt - 1)
     run_prodigal:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 12 * 2 ** (attempt - 1)
@@ -38,14 +35,8 @@ set-resources:
     run_mmseqs:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 30 * 2 ** (attempt - 1)
-    run_checkm2_genomes:
-        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 60 * 2 ** (attempt - 1)
     run_checkm2_clusters:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 60 * 2 ** (attempt - 1)
-    run_gtdbtk:
-        mem_mb: 256 * 1024 * 2 ** (attempt - 1)
         runtime: 60 * 2 ** (attempt - 1)
     run_kofams:
         mem_mb: 16 * 1024 * 2 ** (attempt - 1)
@@ -57,9 +48,6 @@ set-resources:
         mem_mb: 8 * 1024 * 2 ** (attempt - 1)
         runtime: 10 * 2 ** (attempt - 1)
     build_bowtie_index:
-        mem_mb: 32 * 1024 * 2 ** (attempt - 1)
-        runtime: 60 * 2 ** (attempt - 1)
-    map_reads:
         mem_mb: 32 * 1024 * 2 ** (attempt - 1)
         runtime: 60 * 2 ** (attempt - 1)
     quantify_reads:
